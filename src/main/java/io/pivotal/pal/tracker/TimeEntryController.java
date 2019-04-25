@@ -1,5 +1,8 @@
 package io.pivotal.pal.tracker;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -10,51 +13,63 @@ import java.util.List;
 @RequestMapping("/time-entries")
 public class TimeEntryController {
 
-    private TimeEntryRepository timeEntryRepository;
+    private TimeEntryRepository timeEntriesRepo;
+    private final DistributionSummary timeEntrySummary;
+    private final Counter actionCounter;
 
-    public TimeEntryController(TimeEntryRepository timeEntryRepository) {
-        this.timeEntryRepository = timeEntryRepository;
+    public TimeEntryController(
+            TimeEntryRepository timeEntriesRepo,
+            MeterRegistry meterRegistry
+    ) {
+        this.timeEntriesRepo = timeEntriesRepo;
+
+        timeEntrySummary = meterRegistry.summary("timeEntry.summary");
+        actionCounter = meterRegistry.counter("timeEntry.actionCounter");
     }
 
-    @RequestMapping(method = RequestMethod.POST)
-    public ResponseEntity create(@RequestBody TimeEntry timeEntryToCreate) {
-        return new ResponseEntity<>(timeEntryRepository.create(timeEntryToCreate),
-                HttpStatus.CREATED);
+    @PostMapping
+    public ResponseEntity<TimeEntry> create(@RequestBody TimeEntry timeEntry) {
+        TimeEntry createdTimeEntry = timeEntriesRepo.create(timeEntry);
+        actionCounter.increment();
+        timeEntrySummary.record(timeEntriesRepo.list().size());
+
+        return new ResponseEntity<>(createdTimeEntry, HttpStatus.CREATED);
     }
 
-    @RequestMapping(value = "{id}", method = RequestMethod.GET)
+    @GetMapping("{id}")
     public ResponseEntity<TimeEntry> read(@PathVariable Long id) {
-        HttpStatus httpStatus;
-        TimeEntry timeEntry = timeEntryRepository.find(id);
+        TimeEntry timeEntry = timeEntriesRepo.find(id);
         if (timeEntry != null) {
-            httpStatus = HttpStatus.OK;
+            actionCounter.increment();
+            return new ResponseEntity<>(timeEntry, HttpStatus.OK);
         } else {
-            httpStatus = HttpStatus.NOT_FOUND;
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
-        return new ResponseEntity<>(timeEntry,
-                httpStatus);
     }
 
     @GetMapping
     public ResponseEntity<List<TimeEntry>> list() {
-        return new ResponseEntity<>(timeEntryRepository.list(),
-                HttpStatus.OK);    }
+        actionCounter.increment();
+        return new ResponseEntity<>(timeEntriesRepo.list(), HttpStatus.OK);
+    }
 
-    @RequestMapping(value = "{id}", method = RequestMethod.PUT)
-    public ResponseEntity update(@PathVariable long id, @RequestBody TimeEntry expected) {
-        HttpStatus httpStatus;
-        TimeEntry timeEntry = timeEntryRepository.update(id,expected);
-        if (timeEntry != null) {
-            httpStatus = HttpStatus.OK;
+    @PutMapping("{id}")
+    public ResponseEntity<TimeEntry> update(@PathVariable Long id, @RequestBody TimeEntry timeEntry) {
+        TimeEntry updatedTimeEntry = timeEntriesRepo.update(id, timeEntry);
+        if (updatedTimeEntry != null) {
+            actionCounter.increment();
+            return new ResponseEntity<>(updatedTimeEntry, HttpStatus.OK);
         } else {
-            httpStatus = HttpStatus.NOT_FOUND;
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
-        return new ResponseEntity<>(timeEntry,
-                httpStatus);    }
+    }
 
-    @RequestMapping(value = "{id}", method = RequestMethod.DELETE)
-    public ResponseEntity delete(@PathVariable long id) {
-        timeEntryRepository.delete(id);
+    @DeleteMapping("{id}")
+    public ResponseEntity<TimeEntry> delete(@PathVariable Long id) {
+        timeEntriesRepo.delete(id);
+        actionCounter.increment();
+        timeEntrySummary.record(timeEntriesRepo.list().size());
+
         return new ResponseEntity<>(HttpStatus.NO_CONTENT);
     }
 }
